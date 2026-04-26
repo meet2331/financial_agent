@@ -29,14 +29,15 @@ except Exception as e:
     st.error(f"Import error: {e}")
     st.stop()
 
-# --- 3. Create single agent (no team = no transfer errors) ---
 @st.cache_resource(show_spinner="Initializing AI...")
 def get_agent():
-    # Use llama-3.1-8b-instant - Groq's most reliable tool-caller
+    # Switch to 70b - same free tier but handles larger context better
+    # AND set max_tokens to limit response size
     model = Groq(
-        id="llama-3.1-8b-instant",
+        id="llama-3.3-70b-versatile",  # 12k TPM on free tier vs 6k for 8b
         api_key=GROQ_API_KEY,
-        temperature=0.1
+        temperature=0.1,
+        max_tokens=1500  # cap output
     )
     
     return Agent(
@@ -48,28 +49,28 @@ def get_agent():
                 analyst_recommendations=True,
                 stock_fundamentals=True,
                 company_news=True,
-                historical_prices=True,  # enables 3-year data
-                key_financial_ratios=True,
-                income_statements=True,
+                historical_prices=True,
+                key_financial_ratios=False,  # disable heavy tools
+                income_statements=False,
             ),
             DuckDuckGo(
                 search=True,
                 news=True,
-                fixed_max_results=5,  # prevents max_results hallucination
-                timeout=15
+                fixed_max_results=3,  # was 5, now 3
+                timeout=10
             )
         ],
         instructions=[
-            "For 'average return over X years': ALWAYS use historical_prices tool first",
-            "Calculate CAGR as: (end_price / start_price) ** (1/years) - 1",
-            "Never estimate or assume growth rates - calculate from actual data",
-            "Present financial data in markdown tables",
-            "Always include sources with URLs for news",
-            "If a tool fails, explain what data is missing instead of guessing"
+            "CRITICAL: For historical prices, ALWAYS use period='3y' and interval='1mo' - never daily data",
+            "For returns: calculate CAGR = (end/start)^(1/years)-1 using monthly data only",
+            "Summarize news in 2 sentences max per article",
+            "Use tables, keep responses under 300 words",
+            "Never return raw JSON or full price history"
         ],
-        show_tool_calls=True,
+        show_tool_calls=False,  # was True - saves ~2000 tokens
         markdown=True,
-        add_datetime_to_instructions=True,
+        add_datetime_to_instructions=False,  # saves tokens
+        num_history_responses=0,  # don't send chat history to model
     )
 
 try:
@@ -107,7 +108,7 @@ if prompt := st.chat_input("Ask about any stock..."):
     with st.chat_message("assistant"):
         with st.spinner("Fetching data..."):
             try:
-                response = agent.run(prompt, stream=False)
+                response = agent.run(prompt,stream=False,extra_instructions="Use minimal data. For historical prices: period=3y, interval=1mo only.")
                 answer = response.content
                 
                 st.markdown(answer)
